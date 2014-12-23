@@ -11,7 +11,7 @@ FIND_VALUE_RETURN = 33
 
 
 class Msg:
-    def __init__(self, rpc_type, target_id, target_port, source_id, source_port, key, value, status, info):
+    def __init__(self, rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count):
         """
         :param rpc_type: int
         :param target_id:  long
@@ -22,7 +22,7 @@ class Msg:
         :param value:  str
         :param status:  bool
         :param info:  dict
-        :return: no
+        :param hop_count: int
         """
         self.rpc = rpc_type
         self.target_id = target_id
@@ -33,10 +33,11 @@ class Msg:
         self.value = value
         self.status = status
         self.info = info
+        self.hop_count = hop_count
 
     def __str__(self):
-        return "Msg. rpc:%s, target:%s, source:%s, key/value:%s, status:%s info:%s." % \
-                    (self.rpc, [self.target_id,self.target_port], [self.source_id,self.source_port], [self.key,self.value], self.status, self.info)
+        return "Msg. rpc:%s, target:%s, source:%s, key/value:%s, status:%s info:%s hop_count:%d ." % \
+                    (self.rpc, [self.target_id,self.target_port], [self.source_id,self.source_port], [self.key,self.value], self.status, self.info, self.hop_count)
 
 
 

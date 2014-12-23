@@ -40,3 +40,14 @@ class KBucketsTest(unittest.TestCase):
         self.kbucket.add_bucket((1253,8086),6)
         self.kbucket.add_bucket((1252,8087),6)
         self.assertEqual(self.kbucket.find_closest_node(1238,5), [(1239,8083),(1234, 8081),(1235,8085)])
+
+    def test_node_count(self):
+        self.kbucket.add_bucket((123,8080),5)
+        self.kbucket.add_bucket((1234, 8081),5)
+        #self.kbucket.add_bucket((12344,8082),5)
+        self.kbucket.add_bucket((1239,8083),4)
+        self.kbucket.add_bucket((1223,8084),3)
+        self.kbucket.add_bucket((1235,8085),6)
+        self.kbucket.add_bucket((1253,8086),6)
+        self.kbucket.add_bucket((1252,8087),6)
+        self.assertEqual(7, self.kbucket.node_count())

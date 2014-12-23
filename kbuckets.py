@@ -1,6 +1,6 @@
 __author__ = 'X'
 BUCKET_NUM = 160
-K = 5
+K = 20
 a = 3
 k = 5
 
@@ -25,12 +25,12 @@ class KBuckets:
         """
         currentBucket = self.bucket[bucketNum]
         if id in currentBucket:
-            print "refresh %s in bucket %d" % (id, bucketNum)
+            ###print "refresh %s in bucket %d" % (id, bucketNum)
             self.bucket[bucketNum].remove(id)
             self.bucket[bucketNum].append(id)
         else:
             if len(currentBucket) < K:
-                print "add %s in bucket %d" % (id, bucketNum)
+                ###print "add %s in bucket %d" % (id, bucketNum)
                 self.bucket[bucketNum].append(id)
             else:
                 pass
@@ -39,7 +39,7 @@ class KBuckets:
     def delete_bucket(self, id, bucketNum):
         """
         :param id: only need sid
-        :param bucketNum:
+        :param bucketNum: int for bucket number to delete
         :return:
         """
         if id in self.bucket[bucketNum]:
@@ -48,10 +48,10 @@ class KBuckets:
 
     def find_closest_node(self, id, bucketNum):
         """
-        find closest node in a particular bucket
+        find closest nodes in all buckets
         :param id:  sid for int
         :param bucketNum: int
-        :return: (sid, port) tuple for (int, int)
+        :return: (sid, port) tuples like [(1,1), (2,2)], list length determined by param a!
         """
         result = self.bucket[bucketNum]
         for i in range(1,BUCKET_NUM):
@@ -63,6 +63,9 @@ class KBuckets:
 #        print result
         sort_bucket = sorted(result, cmp=lambda x,y: cmp(x[0] ^id, y[0] ^id))
         return sort_bucket[:a]
+
+    def node_count(self):
+        return len(reduce(lambda x,y: x+y, self.bucket, []))
 
 
 

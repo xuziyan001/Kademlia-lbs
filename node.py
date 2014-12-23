@@ -1,5 +1,6 @@
 __author__ = 'X'
 import hashlib
+import threading
 from kbuckets import KBuckets
 from msg import Msg
 import msg
@@ -10,6 +11,7 @@ import kbuckets
 from twisted.application import internet, service
 from twisted.internet import protocol, reactor, defer
 from twisted.protocols  import  basic
+
 
 
 class KademliaServer(basic.LineReceiver):
@@ -41,7 +43,7 @@ class KademliaClient(protocol.Protocol):
         self.transport.loseConnection()
 
     def connectionLost(self, reason):
-        print "\r\n"
+        pass
 
 class KademliaClientFactory(protocol.ClientFactory):
     protocol = KademliaClient
@@ -52,11 +54,11 @@ class KademliaClientFactory(protocol.ClientFactory):
         return  self.message
 
     def clientConnectionFailed(self, connector, reason):
-        print "\r\n"
+        pass
 #        reactor.stop()
 
     def clientConnectionLost(self, connector, reason):
-        print "\r\n"
+        pass
  #       reactor.stop()
 
 class Node(protocol.ServerFactory):
@@ -71,6 +73,8 @@ class Node(protocol.ServerFactory):
         self.find_node_cache = {}
         self.find_node_already = {}
         self.active_key = []
+        self.total_find_node_count = 0
+        self.total_find_value_count = 0
 
     def __str__(self):
         return str(self.nodeId)+" "+str(self.port)
@@ -91,6 +95,10 @@ class Node(protocol.ServerFactory):
         return info_res
 
     def dic_to_str(self, dic):
+        """
+        :param dic: dict
+        :return: a str like 'a=1&b=2&c=3'
+        """
         res = ''
         if dic == {}:
             return res
@@ -100,8 +108,13 @@ class Node(protocol.ServerFactory):
 
 
     def handle_message(self, message):
+        """
+        main function to handle message
+        :param message:  str that server received
+        :return: nothing
+        """
         print str(self.nodeId)+' '+str(self.port) + ' recv msg: %s' % message
-        time.sleep(1)
+        #time.sleep(1)
         mesg = message.split(' ')
         rpc_type = int(mesg[0])
         target_id = long(mesg[1])
@@ -112,7 +125,8 @@ class Node(protocol.ServerFactory):
         value = mesg[6]
         status = True if mesg[7]=="True" else False
         info = self.parse_info(mesg[8])
-        res = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+        hop_count = int(mesg[9])
+        res = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
         if rpc_type == msg.PING:
             self.handle_ping(res)
             return defer.succeed("handle_ping")
@@ -140,9 +154,9 @@ class Node(protocol.ServerFactory):
 
     def find_closest_node(self, id):
         """
-        find closest node in k buckets
-        :param id: sid to search k buckets
-        :return: (sid, port) tuple
+        find closest nodes in k buckets
+        :param id: long for sid to search k buckets
+        :return: list for (sid, port) tuples like [(1,1), (2,2)], list length determined by param kbuckets.a!
         """
         bucketNum = self.find_bucket_num(id)
         return self.kBuckets.find_closest_node(id, bucketNum)
@@ -188,7 +202,7 @@ class Node(protocol.ServerFactory):
     def find_bucket_num(self, id):
         """
         :param id: sid to locate k-bucket
-        :return: bucket number
+        :return: int for bucket number
         """
         sid = id
         num = 0
@@ -210,7 +224,8 @@ class Node(protocol.ServerFactory):
         value = -1
         status = True
         info = {}
-        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+        hop_count = message.hop_count + 1
+        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
         self.send(result, (target_id, target_port))
 
     def handle_pong(self, message):
@@ -219,12 +234,12 @@ class Node(protocol.ServerFactory):
 
     def handle_store(self, message):
         self.store[message.key] = message.value
-        print "%s %s store %s for key %s." % (self.nodeId, self.port, message.value, message.key)
+        ###print "%s %s store %s for key %s." % (self.nodeId, self.port, message.value, message.key)
 
     def handle_find_node(self, message):
         key = message.key
         target_node = self.find_closest_node(key)
-        print "%s find closest node %s for key %s." % (self.port, target_node, key)
+        ###print "%s find closest node %s for key %s." % (self.port, target_node, key)
         info = {}
         for each in target_node:
             info[each[0]] = each[1]
@@ -235,14 +250,16 @@ class Node(protocol.ServerFactory):
         source_port = self.port
         value = message.value
         status = True
-        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+        hop_count = message.hop_count + 1
+        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
         self.send(result, (target_id, target_port))
 
     def handle_find_node_return(self, message):
         key = message.key
         value = message.value
         info = message.info
-        print "key: %s" % key
+        hop_count = message.hop_count + 1
+        ###print "key: %s" % key
         #if key not in self.find_node_cache:
         #    self.find_node_cache[key] = []
         if key not in self.find_node_already:
@@ -260,9 +277,11 @@ class Node(protocol.ServerFactory):
             print "find node finish, result is %s."  % result
             self.find_node_already[key] = []
             self.find_node_cache[key] = []
+            self.total_find_node_count += hop_count
+            self.write_static(message.rpc, hop_count, key)
             if value != '-1':
                 for each in result:
-                    store_query = Msg(1, each[0], each[1], self.nodeId, self.port, key, value, True, {})
+                    store_query = Msg(1, each[0], each[1], self.nodeId, self.port, key, value, True, {}, hop_count)
                     self.send(store_query, (each[0], each[1]))
             return result
         for sid_port in info_list:
@@ -276,15 +295,16 @@ class Node(protocol.ServerFactory):
                 value = message.value
                 status = True
                 info = {}
-                result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+                result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
                 self.send(result, (target_id, target_port))
-        print "cache: %s" % self.find_node_cache[key]
-        print "already: %s" % self.find_node_already[key]
+        ###print "cache: %s" % self.find_node_cache[key]
+        ###print "already: %s" % self.find_node_already[key]
 
     def handle_find_value(self, message):
         key = message.key
+        hop_count = message.hop_count + 1
         if key in self.store:
-            print "%s %s find value %s for key %s." % (self.nodeId, self.port, self.store[key], key)
+            ###print "%s %s find value %s for key %s." % (self.nodeId, self.port, self.store[key], key)
             rpc_type = msg.FIND_VALUE_RETURN
             target_id = message.source_id
             target_port = message.source_port
@@ -293,11 +313,11 @@ class Node(protocol.ServerFactory):
             value = self.store[key]
             status = True
             info = {}
-            result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+            result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
             self.send(result, (target_id, target_port))
             return
         target_node = self.find_closest_node(key)
-        print "%s find closest node %s for key %s." % (self.port, target_node, key)
+        ###print "%s find closest node %s for key %s." % (self.port, target_node, key)
         info = {}
         for each in target_node:
             info[each[0]] = each[1]
@@ -308,7 +328,7 @@ class Node(protocol.ServerFactory):
         source_port = self.port
         value = -1
         status = False
-        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+        result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
         self.send(result, (target_id, target_port))
 
     def handle_find_value_return(self, message):
@@ -317,14 +337,15 @@ class Node(protocol.ServerFactory):
             return "already found value for key %s." % key
         if message.status == False:
             info = message.info
-            print "key: %s" % key
+            hop_count = message.hop_count + 1
             if key not in self.find_node_already:
                 self.find_node_already[key] = []
             source_id = message.source_id
             source_port = message.source_port
             self.find_node_already[key].append((source_id, source_port))
-            print "cache: %s" % self.find_node_cache[key]
-            print "already: %s" % self.find_node_already[key]
+            ###print "key: %s" % key
+            ###print "cache: %s" % self.find_node_cache[key]
+            ###print "already: %s" % self.find_node_already[key]
             info_list = []
             for each in info:
                 sid_port = (long(each), int(info[each]))
@@ -334,6 +355,8 @@ class Node(protocol.ServerFactory):
                 self.find_node_already[key] = []
                 self.find_node_cache[key] = []
                 self.active_key.remove(key)
+                self.total_find_value_count += hop_count
+                self.write_static(message.rpc, hop_count, key)
                 return "no found key %s." % key
             for sid_port in info_list:
                 if sid_port not in self.find_node_cache[key]:
@@ -346,7 +369,7 @@ class Node(protocol.ServerFactory):
                     value = -1
                     status = True
                     info = {}
-                    result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info)
+                    result = Msg(rpc_type, target_id, target_port, source_id, source_port, key, value, status, info, hop_count)
                     self.send(result, (target_id, target_port))
         else:
             self.active_key.remove(key)
@@ -358,14 +381,26 @@ class Node(protocol.ServerFactory):
     def handle_register(self, message):
         key = message.key
         value = message.value
-        query_message = Msg(2, 0, 0, self.nodeId, self.port, key, value, True, {})
+        hop_count = message.hop_count
+        query_message = Msg(2, 0, 0, self.nodeId, self.port, key, value, True, {}, hop_count)
         self.send(query_message, (self.nodeId, self.port))
 
     def send(self, message, id):
+        """
+        interface for node to send message
+        :param message: Msg object
+        :param id: (sid, port) tuple
+        :return: nothing
+        """
         port = id[1]
         #print "now port is %s" % port
         msg = str(message.rpc)+' '+str(message.target_id)+' '+str(message.target_port)+' '+str(message.source_id)+' '+str(message.source_port) \
-             +' '+str(message.key)+' '+str(message.value)+' '+str(message.status)+' '+self.dic_to_str(message.info)
+             +' '+str(message.key)+' '+str(message.value)+' '+str(message.status)+' '+self.dic_to_str(message.info)+' '+str(message.hop_count)
         f = KademliaClientFactory(msg)
         reactor.connectTCP("localhost", port, f)
         print str(self.nodeId)+' '+str(self.port)+" send message: %s to port %s." % (msg, port)
+
+    def write_static(self, rpc, hop_count, key):
+        fp = file('static'+str(key)+'.txt', 'a')
+        fp.write("node: %s %d  rpc: %s  count:%d.\r\n" % (self.nodeId, self.port, "find_node" if rpc == 22 else "find_value", hop_count))
+        fp.close()
